@@ -1,0 +1,163 @@
+MODULE:
+module risc_32(clk);
+    input clk;
+    reg [31:0]ex_mem_aluout;
+    reg[31:0] if_id_ir, pc , if_id_npc;
+    reg[31:0] id_ex_ir, id_ex_a, id_ex_b, id_ex_imm , id_ex_npc;
+    reg[31:0] ex_mem_ir;
+    reg[1:0] id_ex_type, ex_mem_type, mem_rb_type ,ex_mem_cond;
+    reg[31:0] mem_rb_ir, mem_rb_aluout;
+    reg[31:0] regb[0:31];
+    reg[31:0] mem[0:31], datamem[0:31];
+    reg[5:0] id_ex_opcd, ex_mem_opcd;
+    reg halted;
+   
+    parameter add = 6'b000000, sub = 6'b000001, mul = 6'b000010, div = 6'b000011, lsft = 6'b000110, and_32=6'b000100, or_32 = 6'b000101, addi = 6'b100001, subi = 6'b100010, muli = 6'b100011, divi = 6'b100100, halt = 6'b111111;
+    parameter lw = 6'b110000, sw = 6'b110001;
+    parameter rr_type = 2'b00, rm_type = 2'b01, ls_type = 2'b10;
+    
+    //INSTRUCTION FETCH
+    always @(posedge clk)
+        if(halted == 0)
+             begin
+                    if_id_ir = mem[pc];
+                    if_id_npc <= pc+1;
+                    pc = pc + 1;
+                end
+    
+    //INSTRUCTION DECODE
+    always @(posedge clk)
+        begin
+        if(halted == 0)
+            begin
+            if(if_id_ir[31:26] == 6'b111111)
+            halted <= 1;
+            if(if_id_ir[31:30] == 2'b00)
+            id_ex_type <= rr_type;
+            if(if_id_ir[31:30] == 2'b10)
+            id_ex_type <= rm_type;
+            if(if_id_ir[31:30] == 2'b11)
+            id_ex_type <= ls_type;
+            end
+        id_ex_ir <= if_id_ir;
+        id_ex_npc<= if_id_npc;
+        id_ex_a <= regb[if_id_ir[20:16]];
+        id_ex_b <= regb[if_id_ir[15:11]];
+        id_ex_imm <= if_id_ir[15:0];
+        id_ex_opcd <= if_id_ir[31:26];
+        end
+    //INSTRUCTION EXECUTE
+    always @(posedge clk)
+        begin
+        if(halted == 0)
+            begin
+            case(id_ex_type)
+            rr_type : begin
+                      case(id_ex_opcd)
+                          add : ex_mem_aluout <= id_ex_a + id_ex_b;
+                          sub : ex_mem_aluout <= id_ex_a - id_ex_b;
+                          mul : ex_mem_aluout <= id_ex_a * id_ex_b;
+                          div : ex_mem_aluout <= id_ex_a / id_ex_b;
+                          lsft : ex_mem_aluout <= id_ex_a << id_ex_b;
+                          and_32:ex_mem_aluout <= id_ex_a & id_ex_b;
+                          or_32 : ex_mem_aluout<= id_ex_a | id_ex_b;
+                          default : ex_mem_aluout <= 8'h00000000;
+                      endcase
+                      end
+           
+            rm_type : begin
+                      case(id_ex_opcd)
+                          addi : ex_mem_aluout <= id_ex_a + id_ex_imm;
+                          subi : ex_mem_aluout <= id_ex_a - id_ex_imm;
+                          muli : ex_mem_aluout <= id_ex_a * id_ex_imm;
+                          divi : ex_mem_aluout <= id_ex_a / id_ex_imm;
+                          default : ex_mem_aluout <= 8'h00000000;
+                      endcase
+                      end
+           
+            ls_type : begin
+                      case(id_ex_opcd)
+                          sw : ex_mem_aluout <= id_ex_a + id_ex_imm;
+                          lw : ex_mem_aluout <= id_ex_a + id_ex_imm;
+                      endcase
+                      end
+            default : ex_mem_aluout <= 8'h00000000;
+            endcase
+            end
+        ex_mem_ir <= id_ex_ir;
+        ex_mem_type <= id_ex_type;
+        ex_mem_opcd <= id_ex_opcd;
+        end
+     //MEMORY STORAGE
+    always @(posedge clk)
+        begin
+        if(halted == 0)
+            begin
+            mem_rb_ir <= ex_mem_ir;
+            mem_rb_type <= ex_mem_type;
+            if(ex_mem_opcd == lw) mem_rb_aluout <= datamem[ex_mem_aluout];
+            else if(ex_mem_opcd == sw) datamem[ex_mem_aluout] <= regb[ex_mem_ir[25:21]];
+            else mem_rb_aluout <= ex_mem_aluout;
+            end
+        end
+       
+    //WRITE BACK
+    always @(posedge clk)
+                if(halted == 0)
+                   regb[mem_rb_ir[25:21]] <= mem_rb_aluout;
+endmodule
+
+
+
+
+
+TESTBENCH:
+
+module test_risc();
+    reg clk;
+    integer k;
+    risc_32 dut(clk);
+   
+    initial
+        begin
+            clk=0;      
+        end
+    always
+    begin
+        #5 clk = ~clk;
+        end
+   
+    initial
+    begin
+    for (k=0; k<31; k = k+1) dut.regb[k] <= k;
+    dut.mem[0] <= 32'h8420000a; // r1 = r0 + 10
+    dut.mem[2] <= 32'h8440001e; // r2 = r0 + 30
+    dut.mem[3] <= 32'h0ce77800; // dummy
+    dut.mem[4] <= 32'h0ce77800; // dummy
+    dut.mem[5] <= 32'h84600014; // r3 = r0 + 20
+    dut.mem[6] <= 32'h00811000; // r4 = r1 + r2
+    dut.mem[7] <= 32'h1ce77800; // dummy
+    dut.mem[7] <= 32'h2ce77800; // dummy
+    dut.mem[8] <= 32'h04a30800; // r5 = r3 - r1 = 10 
+    dut.mem[9] <= 32'hc4600000; // sw r3 r0 0
+    dut.mem[10] <= 32'hc0c00000;// lw r6 r0 0
+    dut.mem[11] <= 32'h08e11000; // r7=r1*r2 = 300
+    dut.mem[12] <= 32'h0d020800; // r8=r2/r1 = 3
+    dut.mem[13]<= 32'h11210000; // r9=r1&r0 = 0
+    dut.halted <= 0;
+    dut.pc <= 0;
+    
+    $monitor("r0 - %d",dut.regb[0]);
+    $monitor("r1 - %d",dut.regb[1]);
+    $monitor("r2 - %d",dut.regb[2]);
+    $monitor("r3 - %d",dut.regb[3]);
+    $monitor("r4 - %d",dut.regb[4]);
+    $monitor("r5 - %d",dut.regb[5]);
+    $monitor("r6 - %d",dut.regb[6]);
+    $monitor("r7 - %d",dut.regb[7]);
+    $monitor("r8 - %d",dut.regb[8]);
+    $monitor("r9 - %d",dut.regb[9]);  
+    $monitor($time,"op-cd = %b, A = %b, B = %b, IMM = %b, aluout = %d,datamem[0] = %b", dut.id_ex_opcd, dut.id_ex_a, dut.id_ex_b, dut.id_ex_imm, dut.ex_mem_aluout, dut.datamem[0]);
+    #200 $finish;
+    end
+endmodule
